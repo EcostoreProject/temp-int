@@ -30,9 +30,6 @@
 #define TEMPS_ATTENTE_LOOP 5000 // Duree d'attente entre deux mesures, en millisecondes.
 #define CODE_ERREUR 0xFF // Valeur envoyee lorsque la lecture du capteur echoue.
 
-#define EMETTEUR NODE_TEMP_INT
-#define DESTINATAIRE NODE_HUB
-
 DHT dht(DHTPIN, DHTTYPE);
 
 SoftwareSerial XBee(2, 3);
@@ -92,8 +89,8 @@ void loop() {
   }
 
   FrameMsg_t message = {
-      .dest_id = DESTINATAIRE,
-      .src_id = EMETTEUR,
+      .dest_id = NODE_HUB,
+      .src_id = NODE_CAPTEUR_TEMPERATURE_INTERNE,
       .cmd = commande,
       .value = data
   };
