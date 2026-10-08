@@ -1,3 +1,17 @@
+/*
+ ****************************************************************************
+ *                                                                          *
+ *              CAPTEUR DE TEMPERATURE INTERIEUR                            *
+ *                                                                          *
+ *  Ce script mesure la temperature interieure avec un capteur DHT11,       *
+ *  l'affiche sur un ecran LCD et transmet la valeur à un relais            *
+ *  via un module XBee.                                                     *
+ *                                                                          *
+ *  Auteurs : Mathys GESLIN et Thomas HYAUMET                               *
+ *                                                                          *
+ ****************************************************************************
+ */
+
 #include "LiquidCrystal_I2C.h"
 #include "DHT.h"
 #include "SoftwareSerial.h"
@@ -10,6 +24,12 @@
 #define DHTPIN 17 // A3
 #define DHTTYPE DHT11
 
+#define LCD_COLONNES 16 // Nombre de colonnes de l'ecran LCD
+#define LCD_LIGNES 2 // Nombre de lignes de l'ecran LCD
+#define VITESSE_SERIE 9600 // Vitesse de communication des ports serie, en bauds
+#define TEMPS_ATTENTE_LOOP 5000 // Duree d'attente entre deux mesures, en millisecondes.
+#define CODE_ERREUR 0x1FF // Valeur envoyee lorsque la lecture du capteur echoue.
+
 #define EMETTEUR NODE_TEMP_INT
 #define DESTINATAIRE NODE_HUB
 
@@ -17,11 +37,11 @@ DHT dht(DHTPIN, DHTTYPE);
 
 SoftwareSerial XBee(2, 3);
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal_I2C lcd(0x27, LCD_COLONNES, LCD_LIGNES);
 
 void setup() {
-  Serial.begin(9600);
-  XBee.begin(9600);
+  Serial.begin(VITESSE_SERIE);
+  XBee.begin(VITESSE_SERIE);
   dht.begin();
   lcd.init();
   creerBarres();
@@ -34,7 +54,7 @@ void setup() {
 void loop() {
 
   
-  attendreAvecBarre(5000);
+  attendreAvecBarre(TEMPS_ATTENTE_LOOP);
 
   // Lecture de la température
   float temperature = dht.readTemperature();
@@ -46,7 +66,7 @@ void loop() {
     Serial.println("Echec reception");
 
     // Valeur indiquant une erreur
-    data = 0x1FF;
+    data = CODE_ERREUR;
     lcd.setCursor(0, 0);
     lcd.print("Erreur     ");
   }
@@ -120,7 +140,7 @@ void creerBarres() {
 // Dessine la barre sur la ligne 2 (pas de 0 à 80)
 void dessinerBarre(int pas) {
   lcd.setCursor(0, 1);
-  for (int c = 0; c < 16; c++) {
+  for (int c = 0; c < LCD_COLONNES; c++) {
     int reste = pas - c * 5;
     if (reste >= 5)     lcd.write((byte)5);
     else if (reste > 0) lcd.write((byte)reste);
@@ -130,7 +150,7 @@ void dessinerBarre(int pas) {
 
 // Remplace delay() : attend "duree" ms en faisant avancer la barre
 void attendreAvecBarre(unsigned long duree) {
-  const int total = 16 * 5;
+  const int total = LCD_COLONNES * 5;
   unsigned long debut = millis();
   int dernier = -1;
   while (millis() - debut < duree) {
