@@ -28,7 +28,7 @@
 #define LCD_LIGNES 2 // Nombre de lignes de l'ecran LCD
 #define VITESSE_SERIE 9600 // Vitesse de communication des ports serie, en bauds
 #define TEMPS_ATTENTE_LOOP 5000 // Duree d'attente entre deux mesures, en millisecondes.
-#define CODE_ERREUR 0x1FF // Valeur envoyee lorsque la lecture du capteur echoue.
+#define CODE_ERREUR 0xFF // Valeur envoyee lorsque la lecture du capteur echoue.
 
 #define EMETTEUR NODE_TEMP_INT
 #define DESTINATAIRE NODE_HUB
@@ -59,7 +59,8 @@ void loop() {
   // Lecture de la température
   float temperature = dht.readTemperature();
 
-  uint16_t data;
+  uint8_t data;
+  FrameCmd_t commande;
 
   if (isnan(temperature)) {
     logTime();
@@ -67,6 +68,7 @@ void loop() {
 
     // Valeur indiquant une erreur
     data = CODE_ERREUR;
+    commande = FRAME_CMD_ERROR;
     lcd.setCursor(0, 0);
     lcd.print("Erreur     ");
   }
@@ -83,42 +85,31 @@ void loop() {
     lcd.print((char) 223);
     lcd.print("C     ");
 
-    // Température entière sur 10 bits
+    commande = FRAME_CMD_WRITE;
+
+    // Température entière sur 8 bits
     data = temperatureInt;
   }
 
-  // 1. Octet de synchronisation
-  uint8_t trame1 = 0xAA;
+  FrameMsg_t message = {
+      .dest_id = DESTINATAIRE,
+      .src_id = EMETTEUR,
+      .cmd = commande,
+      .value = data
+  };
 
-  // 2. Destinataire (3 bits) + émetteur (3 bits) + 2 bits de DATA
-  uint8_t trame2 =
-      (DESTINATAIRE << 5) |
-      (EMETTEUR << 2) |
-      ((data >> 8) & 0x03);
-
-  // 3. 8 bits restants de DATA
-  uint8_t trame3 = data & 0xFF;
-
-  // 4. Checksum
-  uint8_t checksum =
-      (trame1 + trame2 + trame3) % 256;
-
-  // Envoi des 4 octets
-  XBee.write(trame1);
-  XBee.write(trame2);
-  XBee.write(trame3);
-  XBee.write(checksum);
+  uint8_t trame[FRAME_TOTAL_SIZE];
+  frame_pack(&message, trame);
+  XBee.write(trame, FRAME_TOTAL_SIZE);
 
   // Affichage de la trame
   logTime();
   Serial.print("Trame envoyee : ");
-  Serial.print(trame1, HEX);
-  Serial.print(" ");
-  Serial.print(trame2, HEX);
-  Serial.print(" ");
-  Serial.print(trame3, HEX);
-  Serial.print(" ");
-  Serial.println(checksum, HEX);
+  for (uint8_t i = 0; i < FRAME_TOTAL_SIZE; i++) {
+    Serial.print(trame[i], HEX);
+    if (i < FRAME_TOTAL_SIZE - 1) Serial.print(" ");
+  }
+  Serial.println();
 }
 
 void logTime() {
