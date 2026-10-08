@@ -3,11 +3,15 @@
 #include "SoftwareSerial.h"
 #include "Wire.h"
 
+#include <frame_protocol.h>
+#include <xbee_at.h>
+#include <ecostore_nodes.h>
+
 #define DHTPIN 17 // A3
 #define DHTTYPE DHT11
 
-#define EMETTEUR 2
-#define DESTINATAIRE 0
+#define EMETTEUR NODE_TEMP_INT
+#define DESTINATAIRE NODE_HUB
 
 DHT dht(DHTPIN, DHTTYPE);
 
