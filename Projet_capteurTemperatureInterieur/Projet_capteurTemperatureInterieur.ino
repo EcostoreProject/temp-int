@@ -26,9 +26,11 @@
 
 #define LCD_COLONNES 16 // Nombre de colonnes de l'ecran LCD
 #define LCD_LIGNES 2 // Nombre de lignes de l'ecran LCD
-#define VITESSE_SERIE 9600 // Vitesse de communication des ports serie, en bauds
-#define TEMPS_ATTENTE_LOOP 5000 // Duree d'attente entre deux mesures, en millisecondes.
 #define CODE_ERREUR 0xFF // Valeur envoyee lorsque la lecture du capteur echoue.
+
+#define PERIODE_CHRONO_MS 1000 // Rafraichissement du chrono
+#define DUREE_RX_MS 300 // Duree d'affichage de RX
+#define DUREE_TX_MS 500 // Duree d'affichage de TX
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -36,23 +38,51 @@ SoftwareSerial XBee(2, 3);
 
 LiquidCrystal_I2C lcd(0x27, LCD_COLONNES, LCD_LIGNES);
 
+FrameParser_t parseur;
+unsigned long derniereDemande = 0;
+bool demandeRecue = false;
+unsigned long dernierAffichage = 0;
+
+// Indicateur d'activite radio (RX / TX) affiche en fin de ligne 1
+unsigned long debutEchange = 0;
+bool echangeEnCours = false;
+uint8_t etatIndicateur = 0;
+
 void setup() {
-  Serial.begin(VITESSE_SERIE);
-  XBee.begin(VITESSE_SERIE);
+  Serial.begin(XBEE_BAUD);
+  XBee.begin(XBEE_BAUD);
+  frame_parser_init(&parseur);
   dht.begin();
   lcd.init();
-  creerBarres();
   lcd.clear();
   lcd.backlight();
   lcd.display();
-  lcd.setCursor(0, 0);
+
+  afficherLigne(0, "En attente");
+  afficherStatut();
 }
 
 void loop() {
+  while (XBee.available()) {
+    FrameMsg_t messageRecu;
 
-  
-  attendreAvecBarre(TEMPS_ATTENTE_LOOP);
+    if (frame_parse_byte(&parseur, (uint8_t)XBee.read(), &messageRecu) &&
+        messageRecu.dest_id == NODE_CAPTEUR_TEMPERATURE_INTERNE &&
+        messageRecu.cmd == FRAME_CMD_READ) {
+      derniereDemande = millis();
+      demandeRecue = true;
+      debutEchange = derniereDemande;
+      echangeEnCours = true;
+      calculerIndicateur();
+      afficherStatut();
+      envoyerTemperature();
+    }
+  }
 
+  mettreAJourStatut();
+}
+
+void envoyerTemperature() {
   // Lecture de la température
   float temperature = dht.readTemperature();
 
@@ -61,13 +91,13 @@ void loop() {
 
   if (isnan(temperature)) {
     logTime();
-    Serial.println("Echec reception");
+    Serial.println("Echec lecture");
 
     // Valeur indiquant une erreur
     data = CODE_ERREUR;
     commande = FRAME_CMD_ERROR;
-    lcd.setCursor(0, 0);
-    lcd.print("Erreur     ");
+
+    afficherLigne(0, "Erreur capteur");
   }
   else {
     int temperatureInt = (int)temperature;
@@ -77,10 +107,9 @@ void loop() {
     Serial.print(temperatureInt);
     Serial.println(" °C");
 
-    lcd.setCursor(0, 0);
-    lcd.print(temperatureInt);
-    lcd.print((char) 223);
-    lcd.print("C     ");
+    char texte[LCD_COLONNES + 1];
+    snprintf(texte, sizeof(texte), "Temp: %d %cC", temperatureInt, (char)223);
+    afficherLigne(0, texte);
 
     commande = FRAME_CMD_WRITE;
 
@@ -109,44 +138,75 @@ void loop() {
   Serial.println();
 }
 
+// Ecrit un texte sur une ligne, complete a 16 caracteres (pas besoin d'effacer)
+void afficherLigne(uint8_t ligne, const char *texte) {
+  char buffer[LCD_COLONNES + 1];
+  snprintf(buffer, sizeof(buffer), "%-16s", texte);
+  lcd.setCursor(0, ligne);
+  lcd.print(buffer);
+}
+
+// Détermine l'indicateur selon le temps écoulé depuis le début de l'échange
+void calculerIndicateur() {
+  if (!echangeEnCours) {
+    etatIndicateur = 0;
+    return;
+  }
+
+  unsigned long tempsEcoule = millis() - debutEchange;
+  if (tempsEcoule < DUREE_RX_MS) {
+    etatIndicateur = 1;
+  } else if (tempsEcoule < DUREE_RX_MS + DUREE_TX_MS) {
+    etatIndicateur = 2;
+  } else {
+    etatIndicateur = 0;
+    echangeEnCours = false;
+  }
+}
+
+// Ligne 1 : "Depuis 12 s    RX" (13 colonnes pour le chrono, 3 pour l'indicateur)
+void afficherStatut() {
+  char gauche[LCD_COLONNES + 1];
+  char ligne[LCD_COLONNES + 1];
+  char indicateur[4];
+
+  if (demandeRecue) {
+    unsigned long secondes = (millis() - derniereDemande) / 1000;
+    snprintf(gauche, sizeof(gauche), "Depuis %lu s", secondes);
+  } else {
+    snprintf(gauche, sizeof(gauche), "Depuis -- s");
+  }
+
+  if (etatIndicateur == 1) {
+    snprintf(indicateur, sizeof(indicateur), "RX");
+  } else if (etatIndicateur == 2) {
+    snprintf(indicateur, sizeof(indicateur), "TX");
+  } else {
+    indicateur[0] = '\0';
+  }
+
+  // %-13.13s : complete ou tronque a 13 caracteres, %3s : indicateur aligne a droite
+  snprintf(ligne, sizeof(ligne), "%-13.13s%3s", gauche, indicateur);
+  lcd.setCursor(0, 1);
+  lcd.print(ligne);
+
+  dernierAffichage = millis();
+}
+
+// Rafraichit la ligne 1 si l'indicateur change ou si une seconde s'est écoulée
+void mettreAJourStatut() {
+  unsigned long maintenant = millis();
+  uint8_t ancienEtat = etatIndicateur;
+  calculerIndicateur();
+
+  if (ancienEtat != etatIndicateur ||
+      (demandeRecue && maintenant - dernierAffichage >= PERIODE_CHRONO_MS)) {
+    afficherStatut();
+  }
+}
+
 void logTime() {
   Serial.print("[");
   Serial.print(millis() / 1000);
   Serial.print(" s] ");
-}
-
-// Crée les caractères 1 à 5 : 1 colonne remplie, 2 colonnes, ... 5 (bloc plein)
-void creerBarres() {
-  for (byte i = 1; i <= 5; i++) {
-    byte motif[8];
-    byte ligne = (0x1F << (5 - i)) & 0x1F;
-    for (byte j = 0; j < 8; j++) motif[j] = ligne;
-    lcd.createChar(i, motif);
-  }
-}
-
-// Dessine la barre sur la ligne 2 (pas de 0 à 80)
-void dessinerBarre(int pas) {
-  lcd.setCursor(0, 1);
-  for (int c = 0; c < LCD_COLONNES; c++) {
-    int reste = pas - c * 5;
-    if (reste >= 5)     lcd.write((byte)5);
-    else if (reste > 0) lcd.write((byte)reste);
-    else                lcd.write(' ');
-  }
-}
-
-// Remplace delay() : attend "duree" ms en faisant avancer la barre
-void attendreAvecBarre(unsigned long duree) {
-  const int total = LCD_COLONNES * 5;
-  unsigned long debut = millis();
-  int dernier = -1;
-  while (millis() - debut < duree) {
-    int pas = (millis() - debut) * total / duree;
-    if (pas != dernier) {
-      dessinerBarre(pas);
-      dernier = pas;
-    }
-  }
-  dessinerBarre(total);
 }
