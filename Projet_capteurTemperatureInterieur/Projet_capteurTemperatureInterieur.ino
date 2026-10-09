@@ -1,9 +1,9 @@
 /*
  ****************************************************************************
  *                                                                          *
- *              CAPTEUR DE TEMPERATURE INTERIEUR                            *
+ *              CAPTEUR DE TEMPERATURE INTÉRIEURE                           *
  *                                                                          *
- *  Ce script mesure la temperature interieure avec un capteur DHT11,       *
+ *  Ce script mesure la température intérieure avec un capteur DHT11,       *
  *  l'affiche sur un ecran LCD et transmet la valeur à un relais            *
  *  via un module XBee.                                                     *
  *                                                                          *
@@ -26,11 +26,11 @@
 
 #define LCD_COLONNES 16 // Nombre de colonnes de l'ecran LCD
 #define LCD_LIGNES 2 // Nombre de lignes de l'ecran LCD
-#define CODE_ERREUR 0xFF // Valeur envoyee lorsque la lecture du capteur echoue.
+#define CODE_ERREUR 0xFF // Valeur envoyée lorsque la lecture du capteur échoue.
 
 #define PERIODE_CHRONO_MS 1000 // Rafraichissement du chrono
-#define DUREE_RX_MS 300 // Duree d'affichage de RX
-#define DUREE_TX_MS 500 // Duree d'affichage de TX
+#define DUREE_RX_MS 300 // Durée d'affichage de RX
+#define DUREE_TX_MS 500 // Durée d'affichage de TX
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -43,11 +43,18 @@ unsigned long derniereDemande = 0;
 bool demandeRecue = false;
 unsigned long dernierAffichage = 0;
 
-// Indicateur d'activite radio (RX / TX) affiche en fin de ligne 1
+// Indicateur d'activité radio (RX / TX) affiché en fin de ligne 1
 unsigned long debutEchange = 0;
 bool echangeEnCours = false;
 uint8_t etatIndicateur = 0;
 
+// ============================================================================
+// INITIALISATION DU SYSTÈME
+// ============================================================================
+
+/**
+ * Initialise les communications, le capteur DHT11 et l'écran LCD.
+ */
 void setup() {
   Serial.begin(XBEE_BAUD);
   XBee.begin(XBEE_BAUD);
@@ -62,6 +69,17 @@ void setup() {
   afficherStatut();
 }
 
+// ============================================================================
+// BOUCLE PRINCIPALE
+// ============================================================================
+
+/**
+ * Reçoit et traite les demandes de lecture de température.
+ *
+ * La fonction analyse les octets reçus par le module XBee, déclenche une
+ * mesure lorsqu'une trame valide est reçue, puis actualise l'indicateur
+ * d'activité affiché sur l'écran LCD.
+ */
 void loop() {
   while (XBee.available()) {
     FrameMsg_t messageRecu;
@@ -82,6 +100,16 @@ void loop() {
   mettreAJourStatut();
 }
 
+// ============================================================================
+// MESURE ET TRANSMISSION DE LA TEMPÉRATURE
+// ============================================================================
+
+/**
+ * Lit la température, l'affiche et l'envoie au noeud central.
+ *
+ * En cas d'échec de lecture du capteur, la fonction affiche une erreur et
+ * transmet la valeur CODE_ERREUR avec une commande d'erreur.
+ */
 void envoyerTemperature() {
   // Lecture de la température
   float temperature = dht.readTemperature();
@@ -138,7 +166,19 @@ void envoyerTemperature() {
   Serial.println();
 }
 
-// Ecrit un texte sur une ligne, complete a 16 caracteres (pas besoin d'effacer)
+// ============================================================================
+// AFFICHAGE D'UNE LIGNE LCD
+// ============================================================================
+
+/**
+ * Affiche un texte sur une ligne de l'écran LCD.
+ *
+ * Le texte est complété avec des espaces jusqu'à LCD_COLONNES caractères afin
+ * d'effacer les éventuels caractères restants de l'affichage précédent.
+ *
+ * @param ligne Numéro de la ligne LCD à utiliser.
+ * @param texte Texte à afficher.
+ */
 void afficherLigne(uint8_t ligne, const char *texte) {
   char buffer[LCD_COLONNES + 1];
   snprintf(buffer, sizeof(buffer), "%-16s", texte);
@@ -146,7 +186,16 @@ void afficherLigne(uint8_t ligne, const char *texte) {
   lcd.print(buffer);
 }
 
-// Détermine l'indicateur selon le temps écoulé depuis le début de l'échange
+// ============================================================================
+// GESTION DE L'INDICATEUR D'ACTIVITÉ RADIO
+// ============================================================================
+
+/**
+ * Détermine l'état de l'indicateur radio selon la durée de l'échange.
+ *
+ * L'indicateur signale d'abord la réception (RX), puis la transmission (TX).
+ * Il est désactivé lorsque la durée totale de l'échange est dépassée.
+ */
 void calculerIndicateur() {
   if (!echangeEnCours) {
     etatIndicateur = 0;
@@ -164,7 +213,16 @@ void calculerIndicateur() {
   }
 }
 
-// Ligne 1 : "Depuis 12 s    RX" (13 colonnes pour le chrono, 3 pour l'indicateur)
+// ============================================================================
+// AFFICHAGE DU STATUT
+// ============================================================================
+
+/**
+ * Affiche le temps depuis la dernière demande et l'activité radio.
+ *
+ * La ligne LCD réserve 13 caractères au chronometre et 3 caractères à
+ * l'indicateur RX ou TX.
+ */
 void afficherStatut() {
   char gauche[LCD_COLONNES + 1];
   char ligne[LCD_COLONNES + 1];
@@ -185,7 +243,7 @@ void afficherStatut() {
     indicateur[0] = '\0';
   }
 
-  // %-13.13s : complete ou tronque a 13 caracteres, %3s : indicateur aligne a droite
+  // %-13.13s : complète ou tronque à 13 caracteres, %3s : indicateur aligné à droite
   snprintf(ligne, sizeof(ligne), "%-13.13s%3s", gauche, indicateur);
   lcd.setCursor(0, 1);
   lcd.print(ligne);
@@ -193,7 +251,16 @@ void afficherStatut() {
   dernierAffichage = millis();
 }
 
-// Rafraichit la ligne 1 si l'indicateur change ou si une seconde s'est écoulée
+// ============================================================================
+// ACTUALISATION PÉRIODIQUE DU STATUT
+// ============================================================================
+
+/**
+ * Actualise l'indicateur et le chronomètre de l'écran LCD.
+ *
+ * L'affichage n'est rafraichi que lorsque l'état RX/TX change ou qu'une
+ * seconde s'est écoulée depuis le dernier affichage.
+ */
 void mettreAJourStatut() {
   unsigned long maintenant = millis();
   uint8_t ancienEtat = etatIndicateur;
@@ -205,6 +272,16 @@ void mettreAJourStatut() {
   }
 }
 
+// ============================================================================
+// JOURNALISATION DU TEMPS
+// ============================================================================
+
+/**
+ * Écrit dans le moniteur série le temps ecoulé depuis le démarrage.
+ *
+ * Le préfixe produit par cette fonction est formaté sous la forme
+ * "[temps en secondes s] ".
+ */
 void logTime() {
   Serial.print("[");
   Serial.print(millis() / 1000);
